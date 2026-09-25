@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#14182a">
+  <title>Comparador 3D</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/style.css?v=12">
+  <script src="/static/app.js?v=19" defer></script>
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div class="identity"><span class="eyebrow">Herramienta de consulta</span><h1>Comparador 3D</h1><p>Precios de impresoras y filamentos en México</p></div>
+      <div class="header-actions">
+        <button type="button" id="presence-button" class="presence-button" aria-haspopup="dialog" aria-controls="users-dialog" hidden><span id="presence-avatar" class="presence-avatar" aria-hidden="true">U</span><span class="presence-label"><span id="current-user">Usuario</span><strong>Usuarios activos: <span id="active-count">0</span></strong></span></button>
+        <button type="button" id="sources-button" class="secondary" aria-haspopup="dialog" aria-controls="sources-dialog">Fuentes de datos</button>
+        <button type="button" id="refresh" class="primary"><span>↻ &nbsp;Actualizar datos</span></button>
+      </div>
+    </header>
+
+    <section class="workspace" aria-label="Explorar ofertas">
+      <div class="loading-line" aria-hidden="true"></div>
+      <div class="workspace-top">
+        <div class="tabs" role="tablist" aria-label="Tipo de producto">
+          <button id="tab-impresoras" class="tab" type="button" role="tab" aria-controls="results" aria-selected="true" data-view="impresoras"><span>Impresoras 3D</span><span id="printer-count" class="tab-count">0</span></button>
+          <button id="tab-filamentos" class="tab" type="button" role="tab" aria-controls="results" aria-selected="false" data-view="filamentos"><span>Filamentos</span><span id="filament-count" class="tab-count">0</span></button>
+        </div>
+        <p id="view-hint" class="view-hint">Compara equipos completos de distintas tiendas.</p>
+      </div>
+
+      <div class="controls" aria-label="Buscar y filtrar">
+        <div class="search-control"><label class="search-field"><span id="search-label">Buscar modelo o marca</span><input id="search" type="search" placeholder="Ej. Creality K1 Max" autocomplete="off"></label><button id="search-refresh" class="secondary search-refresh" type="button" hidden>Actualizar esta búsqueda</button></div>
+        <label id="material-field" hidden>Material<select id="material"><option value="todos">Todos los materiales</option></select></label>
+        <label>Tienda<select id="store"><option value="todas">Todas las tiendas</option><option value="3D Market">3D Market</option><option value="3DCity">3DCity</option><option value="Creality México">Creality México</option><option value="Inovamarket">Inovamarket</option><option value="Shop3D">Shop3D</option><option value="Amazon México">Amazon México</option><option value="Mercado Libre">Mercado Libre</option></select></label>
+        <label>Ordenar por<select id="sort"><option value="price_asc">Menor precio</option><option value="price_desc">Mayor precio</option><option value="name">Nombre A–Z</option></select></label>
+        <label class="available"><input id="available" type="checkbox"> Solo disponibles</label>
+      </div>
+
+      <div class="results-bar"><div><strong id="result-count">Cargando ofertas…</strong><span id="metric-date"></span></div><div class="results-actions"><span id="source-count"></span><a id="export-csv" class="export-csv" href="/api/export.csv">Descargar CSV</a></div></div>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section id="compare" class="compare" aria-label="Ofertas seleccionadas" hidden>
+        <div class="compare-heading"><div><strong>Comparar ofertas</strong><span id="compare-count"></span></div><button type="button" id="clear-compare">Limpiar selección</button></div>
+        <div id="compare-content" class="compare-content"></div>
+      </section>
+      <div id="results" class="product-grid" role="tabpanel" aria-labelledby="tab-impresoras" aria-live="polite"></div>
+      <button type="button" id="show-more" class="more" hidden>Mostrar más ofertas</button>
+    </section>
+    <p class="footnote">Los precios y existencias pueden cambiar. Confirma el total y el envío en la tienda antes de comprar.</p>
+  </main>
+  <dialog id="sources-dialog" class="sources-dialog" aria-labelledby="sources-title">
+    <div class="dialog-head"><h2 id="sources-title">Catálogo de fuentes</h2><button id="sources-close" type="button" class="dialog-close" aria-label="Cerrar catálogo">×</button></div>
+    <div id="sources-updated" class="sources-updated"></div>
+    <div id="sources-list" class="sources-list" aria-live="polite"></div>
+  </dialog>
+  <dialog id="login-dialog" class="overlay-dialog login-dialog" aria-labelledby="login-title">
+    <form id="login-form">
+      <h2 id="login-title">Ingresa tu nombre</h2>
+      <input id="login-name" name="display_name" type="text" maxlength="32" autocomplete="off" aria-label="Nombre de usuario" placeholder="Nombre de usuario" required>
+      <p id="login-error" class="login-error" role="alert" hidden></p>
+      <button id="login-continue" class="primary" type="submit">Continuar</button>
+    </form>
+  </dialog>
+  <dialog id="users-dialog" class="overlay-dialog users-dialog" aria-labelledby="users-title">
+    <div class="dialog-head"><div><h2 id="users-title">Usuarios activos</h2><p id="users-summary">0 usuarios</p></div><button id="users-close" type="button" class="dialog-close" aria-label="Cerrar usuarios activos">×</button></div>
+    <div id="users-list" class="users-list" aria-live="polite"></div>
+    <div class="users-footer"><button id="logout" type="button">Cerrar sesión</button></div>
+  </dialog>
+</body>
+</html>
