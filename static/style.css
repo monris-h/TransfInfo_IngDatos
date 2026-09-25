@@ -180,9 +180,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .online-indicator { color: #9dd6be; font-size: 11px; white-space: nowrap; }
 .online-indicator::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: #7dd5ac; }
 .users-empty { margin: 12px 0; color: #adbbd7; font-size: 13px; }
-.users-footer { display: flex; align-items: center; justify-content: flex-end; gap: 15px; padding: 15px 24px 19px; border-top: 1px solid var(--line); }
-.users-footer button { padding: 8px 10px; border: 1px solid #6877a0; border-radius: 6px; background: transparent; color: #dce5ff; font-size: 12px; white-space: nowrap; }
-.users-footer button:hover { background: #303e61; }
 
 .skeleton-card { pointer-events: none; }
 .skeleton-image, .skeleton-line { position: relative; overflow: hidden; border-radius: 4px; background: #3a4768; }
@@ -241,7 +238,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .sources-list { padding: 8px 17px 18px; }
   .login-dialog form { padding: 24px 20px; }
   .users-list { padding: 16px 18px; }
-  .users-footer { padding: 14px 18px 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }

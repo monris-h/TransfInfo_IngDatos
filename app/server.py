@@ -4,15 +4,16 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import csv
 import io
+import json
 import logging
 import secrets
-from threading import Lock, Thread
+from threading import Condition, Lock, Thread
 from time import monotonic
 from urllib.parse import urlparse
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -30,9 +31,11 @@ refresh_state = {"status": "idle", "completed_stores": 0, "total_stores": 0,
 LOG = logging.getLogger(__name__)
 compatibility_cache = {}
 STORES = {"todas", "Inovamarket", "3DCity", "Shop3D", "3D Market", "Creality México", "Amazon México", "Mercado Libre"}
-PRESENCE_TTL = 90
+PRESENCE_TTL = 35
 presence_lock = Lock()
+presence_condition = Condition(presence_lock)
 presence_sessions: dict[str, dict] = {}
+presence_revision = 0
 
 
 class PresenceJoin(BaseModel):
@@ -52,13 +55,43 @@ class SearchRefresh(BaseModel):
 
 def _presence_data(now: float) -> dict:
     """Call while holding presence_lock."""
+    expired = False
     for session_id, user in list(presence_sessions.items()):
         if now - user["last_seen"] > PRESENCE_TTL:
             del presence_sessions[session_id]
+            expired = True
+    if expired:
+        _presence_changed()
     users = sorted(presence_sessions.values(), key=lambda user: user["joined_at"])
     return {"count": len(users),
             "users": [{"username": user["username"], "joined_at": user["joined_at"]}
                       for user in users]}
+
+
+def _presence_changed() -> None:
+    """Notify all open presence streams while holding presence_lock."""
+    global presence_revision
+    presence_revision += 1
+    presence_condition.notify_all()
+
+
+def _presence_stream():
+    last_revision = -1
+    while True:
+        with presence_condition:
+            data = _presence_data(monotonic())
+            if presence_revision == last_revision:
+                presence_condition.wait(timeout=5)
+                data = _presence_data(monotonic())
+            changed = presence_revision != last_revision
+            last_revision = presence_revision
+        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n" if changed else ": keepalive\n\n"
+
+
+@app.get("/api/presence/events")
+def presence_events():
+    return StreamingResponse(_presence_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/presence")
@@ -81,7 +114,10 @@ def join_presence(body: PresenceJoin):
             joined_at = datetime.now(timezone.utc).isoformat()
         else:
             joined_at = presence_sessions[session_id]["joined_at"]
+        is_new = session_id not in presence_sessions
         presence_sessions[session_id] = {"username": username, "joined_at": joined_at, "last_seen": now}
+        if is_new:
+            _presence_changed()
         return {"session_id": session_id, "username": username, **_presence_data(now)}
 
 
@@ -99,7 +135,8 @@ def heartbeat_presence(body: PresenceSession):
 @app.post("/api/presence/leave")
 def leave_presence(body: PresenceSession):
     with presence_lock:
-        presence_sessions.pop(body.session_id, None)
+        if presence_sessions.pop(body.session_id, None) is not None:
+            _presence_changed()
         return _presence_data(monotonic())
 
 

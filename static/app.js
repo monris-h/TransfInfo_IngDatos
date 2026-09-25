@@ -16,6 +16,8 @@ let activeView = location.hash === '#filamentos' ? 'filamentos' : 'impresoras';
 let presenceSessionId = sessionStorage.getItem('compare3d_session');
 let presenceUsername = sessionStorage.getItem('compare3d_username');
 let presenceTimer;
+let presenceStream;
+let presenceJoining;
 const sourceCatalog = [
   {name: 'Inovamarket', method: 'API', detail: 'Catálogo WooCommerce', url: 'https://www.inovamarket.com/'},
   {name: 'Shop3D', method: 'API', detail: 'Catálogo WooCommerce', url: 'https://shop3d.mx/'},
@@ -130,7 +132,7 @@ function renderUsers(data) {
     const info = el('div', 'user-info');
     info.append(el('strong', '', user.username));
     info.append(el('small', '', `Activo desde ${new Date(user.joined_at).toLocaleTimeString('es-MX', {hour: '2-digit', minute: '2-digit'})}`));
-    row.append(info, el('span', 'online-indicator', 'En línea'));
+    row.append(info, el('span', 'online-indicator', 'Viendo ahora'));
     host.append(row);
   }
 }
@@ -146,25 +148,51 @@ async function presenceRequest(path, payload) {
   return data;
 }
 
+function sendPresenceLeave(sessionId) {
+  const body = new Blob([JSON.stringify({session_id: sessionId})], {type: 'application/json'});
+  if (!navigator.sendBeacon('/api/presence/leave', body)) {
+    fetch('/api/presence/leave', {method: 'POST', body, keepalive: true}).catch(() => {});
+  }
+}
+
+function startPresenceStream() {
+  if (presenceStream || document.hidden) return;
+  presenceStream = new EventSource('/api/presence/events');
+  presenceStream.onmessage = event => {
+    if (!document.hidden && presenceSessionId) updatePresence(JSON.parse(event.data));
+  };
+}
+
 async function joinPresence(username) {
-  const data = await presenceRequest('/api/presence/join', {username, session_id: presenceSessionId});
-  presenceUsername = data.username;
-  presenceSessionId = data.session_id;
-  sessionStorage.setItem('compare3d_username', presenceUsername);
-  sessionStorage.setItem('compare3d_session', presenceSessionId);
-  updatePresence(data);
-  if ($('login-dialog').open) $('login-dialog').close();
-  clearInterval(presenceTimer);
-  presenceTimer = setInterval(heartbeatPresence, 15000);
+  if (document.hidden) return;
+  if (presenceJoining) return presenceJoining;
+  presenceJoining = (async () => {
+    const data = await presenceRequest('/api/presence/join', {username, session_id: presenceSessionId});
+    if (document.hidden) {
+      sendPresenceLeave(data.session_id);
+      return;
+    }
+    presenceUsername = data.username;
+    presenceSessionId = data.session_id;
+    sessionStorage.setItem('compare3d_username', presenceUsername);
+    sessionStorage.setItem('compare3d_session', presenceSessionId);
+    updatePresence(data);
+    if ($('login-dialog').open) $('login-dialog').close();
+    clearInterval(presenceTimer);
+    presenceTimer = setInterval(heartbeatPresence, 10000);
+    startPresenceStream();
+  })();
+  try { return await presenceJoining; }
+  finally { presenceJoining = null; }
 }
 
 async function heartbeatPresence() {
-  if (!presenceSessionId) return;
+  if (!presenceSessionId || document.hidden) return;
   try {
     const data = await presenceRequest('/api/presence/heartbeat', {session_id: presenceSessionId});
     updatePresence(data);
   } catch (error) {
-    if (error.status === 404 && presenceUsername) {
+    if (error.status === 404 && presenceUsername && !document.hidden) {
       try { await joinPresence(presenceUsername); } catch (_) {}
     }
   }
@@ -189,19 +217,14 @@ function showLogin() {
   if (!$('login-dialog').open) $('login-dialog').showModal();
 }
 
-async function leavePresence() {
+function leavePresenceView() {
   clearInterval(presenceTimer);
+  presenceStream?.close();
+  presenceStream = null;
   const sessionId = presenceSessionId;
   presenceSessionId = null;
-  presenceUsername = null;
   sessionStorage.removeItem('compare3d_session');
-  sessionStorage.removeItem('compare3d_username');
-  $('presence-button').hidden = true;
-  $('users-dialog').close();
-  if (sessionId) {
-    try { await presenceRequest('/api/presence/leave', {session_id: sessionId}); } catch (_) {}
-  }
-  showLogin();
+  if (sessionId) sendPresenceLeave(sessionId);
 }
 
 function imageFor(item) {
@@ -581,7 +604,6 @@ $('users-close').addEventListener('click', () => $('users-dialog').close());
 $('users-dialog').addEventListener('click', event => {
   if (event.target === $('users-dialog')) $('users-dialog').close();
 });
-$('logout').addEventListener('click', leavePresence);
 $('login-dialog').addEventListener('cancel', event => event.preventDefault());
 $('login-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -596,11 +618,12 @@ $('login-form').addEventListener('submit', async event => {
   } finally {button.disabled = false;}
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) heartbeatPresence();
+  if (document.hidden) leavePresenceView();
+  else if (presenceUsername) joinPresence(presenceUsername).catch(() => {});
 });
-window.addEventListener('pagehide', () => {
-  if (presenceSessionId) navigator.sendBeacon('/api/presence/leave',
-    new Blob([JSON.stringify({session_id: presenceSessionId})], {type: 'application/json'}));
+window.addEventListener('pagehide', leavePresenceView);
+window.addEventListener('pageshow', event => {
+  if (event.persisted && presenceUsername && !document.hidden) joinPresence(presenceUsername).catch(() => {});
 });
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => {if (activeView !== tab.dataset.view) {setView(tab.dataset.view); load();}});

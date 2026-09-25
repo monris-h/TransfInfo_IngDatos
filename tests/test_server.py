@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 from threading import Event
 from time import monotonic, sleep
 
@@ -139,12 +140,25 @@ def test_presence_counts_sessions_and_expires_inactive_users(monkeypatch):
     second = server.join_presence(server.PresenceJoin(username="Luis"))
     assert (first["username"], second["count"]) == ("Ana", 2)
     assert [user["username"] for user in server.get_presence()["users"]] == ["Ana", "Luis"]
-    now[0] += 70
+    now[0] += 20
     server.heartbeat_presence(server.PresenceSession(session_id=first["session_id"]))
-    now[0] += 21
+    now[0] += 16
     assert server.get_presence()["count"] == 1
     assert server.get_presence()["users"][0]["username"] == "Ana"
     assert server.leave_presence(server.PresenceSession(session_id=first["session_id"]))["count"] == 0
+
+
+def test_presence_stream_emits_joins_and_leaves_immediately(monkeypatch):
+    monkeypatch.setattr(server, "presence_sessions", {})
+    stream = server._presence_stream()
+    try:
+        assert json.loads(next(stream).removeprefix("data: "))["count"] == 0
+        joined = server.join_presence(server.PresenceJoin(username="Ana"))
+        assert json.loads(next(stream).removeprefix("data: "))["users"][0]["username"] == "Ana"
+        server.leave_presence(server.PresenceSession(session_id=joined["session_id"]))
+        assert json.loads(next(stream).removeprefix("data: "))["count"] == 0
+    finally:
+        stream.close()
 
 
 def test_presence_rejects_blank_name_and_expired_session(monkeypatch):
