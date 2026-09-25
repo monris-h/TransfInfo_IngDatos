@@ -161,6 +161,31 @@ def test_presence_stream_emits_joins_and_leaves_immediately(monkeypatch):
         stream.close()
 
 
+def test_reload_reuses_presence_and_ignores_late_leave(monkeypatch):
+    monkeypatch.setattr(server, "presence_sessions", {})
+    first = server.join_presence(server.PresenceJoin(username="Yerik", view_id="page-1"))
+    reloaded = server.join_presence(server.PresenceJoin(
+        username="Yerik", session_id=first["session_id"], view_id="page-2"))
+    assert reloaded["session_id"] == first["session_id"]
+    assert reloaded["count"] == 1
+    assert server.leave_presence(server.PresenceSession(
+        session_id=first["session_id"], view_id="page-1"))["count"] == 1
+    assert server.heartbeat_presence(server.PresenceSession(
+        session_id=first["session_id"], view_id="page-2"))["count"] == 1
+    assert server.leave_presence(server.PresenceSession(
+        session_id=first["session_id"], view_id="page-2"))["count"] == 0
+
+
+def test_same_name_is_listed_once_even_if_old_tab_session_lingers(monkeypatch):
+    monkeypatch.setattr(server, "presence_sessions", {})
+    first = server.join_presence(server.PresenceJoin(username="Yerik Laptop"))
+    second = server.join_presence(server.PresenceJoin(username="yerik laptop"))
+    assert second["count"] == 1
+    assert len(second["users"]) == 1
+    assert server.leave_presence(server.PresenceSession(session_id=first["session_id"]))["count"] == 1
+    assert server.leave_presence(server.PresenceSession(session_id=second["session_id"]))["count"] == 0
+
+
 def test_presence_rejects_blank_name_and_expired_session(monkeypatch):
     monkeypatch.setattr(server, "presence_sessions", {})
     try:

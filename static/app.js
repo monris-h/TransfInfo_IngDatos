@@ -15,6 +15,8 @@ let timer;
 let activeView = location.hash === '#filamentos' ? 'filamentos' : 'impresoras';
 let presenceSessionId = sessionStorage.getItem('compare3d_session');
 let presenceUsername = sessionStorage.getItem('compare3d_username');
+let presenceViewId = null;
+let presenceActive = false;
 let presenceTimer;
 let presenceStream;
 let presenceJoining;
@@ -148,8 +150,8 @@ async function presenceRequest(path, payload) {
   return data;
 }
 
-function sendPresenceLeave(sessionId) {
-  const body = new Blob([JSON.stringify({session_id: sessionId})], {type: 'application/json'});
+function sendPresenceLeave(sessionId, viewId) {
+  const body = new Blob([JSON.stringify({session_id: sessionId, view_id: viewId})], {type: 'application/json'});
   if (!navigator.sendBeacon('/api/presence/leave', body)) {
     fetch('/api/presence/leave', {method: 'POST', body, keepalive: true}).catch(() => {});
   }
@@ -165,15 +167,22 @@ function startPresenceStream() {
 
 async function joinPresence(username) {
   if (document.hidden) return;
-  if (presenceJoining) return presenceJoining;
+  if (presenceJoining) {
+    await presenceJoining;
+    if (!document.hidden && !presenceViewId) return joinPresence(username);
+    return;
+  }
+  presenceActive = true;
+  const viewId = crypto.randomUUID();
   presenceJoining = (async () => {
-    const data = await presenceRequest('/api/presence/join', {username, session_id: presenceSessionId});
-    if (document.hidden) {
-      sendPresenceLeave(data.session_id);
+    const data = await presenceRequest('/api/presence/join', {username, session_id: presenceSessionId, view_id: viewId});
+    if (!presenceActive || document.hidden) {
+      sendPresenceLeave(data.session_id, viewId);
       return;
     }
     presenceUsername = data.username;
     presenceSessionId = data.session_id;
+    presenceViewId = viewId;
     sessionStorage.setItem('compare3d_username', presenceUsername);
     sessionStorage.setItem('compare3d_session', presenceSessionId);
     updatePresence(data);
@@ -187,12 +196,13 @@ async function joinPresence(username) {
 }
 
 async function heartbeatPresence() {
-  if (!presenceSessionId || document.hidden) return;
+  if (!presenceSessionId || !presenceViewId || document.hidden) return;
+  const viewId = presenceViewId;
   try {
-    const data = await presenceRequest('/api/presence/heartbeat', {session_id: presenceSessionId});
-    updatePresence(data);
+    const data = await presenceRequest('/api/presence/heartbeat', {session_id: presenceSessionId, view_id: viewId});
+    if (presenceActive && presenceViewId === viewId && !document.hidden) updatePresence(data);
   } catch (error) {
-    if (error.status === 404 && presenceUsername && !document.hidden) {
+    if (error.status === 404 && presenceUsername && presenceViewId === viewId && !document.hidden) {
       try { await joinPresence(presenceUsername); } catch (_) {}
     }
   }
@@ -218,13 +228,13 @@ function showLogin() {
 }
 
 function leavePresenceView() {
+  presenceActive = false;
   clearInterval(presenceTimer);
   presenceStream?.close();
   presenceStream = null;
-  const sessionId = presenceSessionId;
-  presenceSessionId = null;
-  sessionStorage.removeItem('compare3d_session');
-  if (sessionId) sendPresenceLeave(sessionId);
+  const viewId = presenceViewId;
+  presenceViewId = null;
+  if (presenceSessionId && viewId) sendPresenceLeave(presenceSessionId, viewId);
 }
 
 function imageFor(item) {

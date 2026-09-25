@@ -41,10 +41,12 @@ presence_revision = 0
 class PresenceJoin(BaseModel):
     username: str
     session_id: str | None = None
+    view_id: str | None = None
 
 
 class PresenceSession(BaseModel):
     session_id: str
+    view_id: str | None = None
 
 
 class SearchRefresh(BaseModel):
@@ -62,7 +64,12 @@ def _presence_data(now: float) -> dict:
             expired = True
     if expired:
         _presence_changed()
-    users = sorted(presence_sessions.values(), key=lambda user: user["joined_at"])
+    unique_users = {}
+    for user in presence_sessions.values():
+        name = user["username"].casefold()
+        if name not in unique_users or user["joined_at"] > unique_users[name]["joined_at"]:
+            unique_users[name] = user
+    users = sorted(unique_users.values(), key=lambda user: user["joined_at"])
     return {"count": len(users),
             "users": [{"username": user["username"], "joined_at": user["joined_at"]}
                       for user in users]}
@@ -113,10 +120,14 @@ def join_presence(body: PresenceJoin):
             session_id = secrets.token_urlsafe(24)
             joined_at = datetime.now(timezone.utc).isoformat()
         else:
-            joined_at = presence_sessions[session_id]["joined_at"]
+            previous = presence_sessions[session_id]
+            joined_at = (previous["joined_at"] if previous.get("view_id") == body.view_id
+                         else datetime.now(timezone.utc).isoformat())
         is_new = session_id not in presence_sessions
-        presence_sessions[session_id] = {"username": username, "joined_at": joined_at, "last_seen": now}
-        if is_new:
+        changed_view = not is_new and presence_sessions[session_id].get("view_id") != body.view_id
+        presence_sessions[session_id] = {"username": username, "joined_at": joined_at,
+                                         "last_seen": now, "view_id": body.view_id}
+        if is_new or changed_view:
             _presence_changed()
         return {"session_id": session_id, "username": username, **_presence_data(now)}
 
@@ -126,7 +137,8 @@ def heartbeat_presence(body: PresenceSession):
     with presence_lock:
         now = monotonic()
         _presence_data(now)
-        if body.session_id not in presence_sessions:
+        if (body.session_id not in presence_sessions or
+                presence_sessions[body.session_id].get("view_id") != body.view_id):
             raise HTTPException(404, "Sesión vencida")
         presence_sessions[body.session_id]["last_seen"] = now
         return _presence_data(now)
@@ -135,7 +147,9 @@ def heartbeat_presence(body: PresenceSession):
 @app.post("/api/presence/leave")
 def leave_presence(body: PresenceSession):
     with presence_lock:
-        if presence_sessions.pop(body.session_id, None) is not None:
+        user = presence_sessions.get(body.session_id)
+        if user and user.get("view_id") == body.view_id:
+            del presence_sessions[body.session_id]
             _presence_changed()
         return _presence_data(monotonic())
 
