@@ -511,8 +511,7 @@ async function pollRefresh() {
   clearTimeout(refreshTimer);
   try {
     const response = await fetch('/api/refresh/status');
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const state = await response.json();
+    const state = await responseData(response);
     const wasRunning = refreshInfo?.status === 'running';
     const reconnected = connectionIssue;
     connectionIssue = false;
@@ -535,6 +534,11 @@ async function pollRefresh() {
       load();
     }
   } catch (error) {
+    if (error.status === 429) {
+      refreshTimer = setTimeout(pollRefresh, (error.retryAfter || 60) * 1000);
+      showNotice(error.message, true);
+      return;
+    }
     connectionIssue = true;
     refreshTimer = setTimeout(pollRefresh, 3000);
     if (refreshInfo?.status !== 'running') {

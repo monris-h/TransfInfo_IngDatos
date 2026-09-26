@@ -43,7 +43,7 @@ rate_windows = {}
 RATE_RULES = {"/": (20, 60), "/api/presence/join": (30, 60),
               "/api/presence/events": (30, 60), "/api/refresh": (1, 60),
               "/api/search/refresh": (4, 60), "/api/export.csv": (10, 60),
-              "/api/compatibility": (12, 60)}
+              "/api/compatibility": (12, 60), "/api/refresh/status": (600, 60)}
 
 
 def _rate_wait(client: str, path: str, now: float) -> int:
