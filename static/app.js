@@ -572,6 +572,7 @@ async function load() {
     const data = await response.json();
     if (currentRequest !== requestNumber) return;
     applyProducts(data);
+    return data;
   } catch (error) {
     if (currentRequest === requestNumber && error.name !== 'AbortError') {
       renderResults();
@@ -622,10 +623,10 @@ async function refreshSearch() {
       body: JSON.stringify({query, context: activeView === 'impresoras' ? 'impresora' : 'filamento', store: $('store').value}),
     });
     const data = await responseData(response, 'search-refresh');
-    await load();
+    const visible = await load();
     const count = data.saved;
     const failures = data.failures.length;
-    showNotice(`${count} ${count === 1 ? 'oferta guardada' : 'ofertas guardadas'} para “${query}” en el catálogo local.${failures ? ` ${failures} ${failures === 1 ? 'fuente no respondió' : 'fuentes no respondieron'}; se conservaron los datos anteriores.` : ''}`, Boolean(failures));
+    showNotice(`${count} ${count === 1 ? 'registro actualizado' : 'registros actualizados'}${visible ? ` · ${visible.total} ${visible.total === 1 ? 'oferta con tus filtros' : 'ofertas con tus filtros'}` : ''}.${failures ? ` ${failures} ${failures === 1 ? 'fuente no respondió' : 'fuentes no respondieron'}.` : ''}`, Boolean(failures));
   } catch (error) {
     showNotice(`No se pudo actualizar “${query}”: ${error.message}`, true);
   } finally {
