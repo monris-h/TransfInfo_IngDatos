@@ -7,13 +7,15 @@ import io
 import json
 import logging
 import secrets
+import math
+from collections import deque
 from threading import Condition, Lock, Thread
 from time import monotonic
 from urllib.parse import urlparse
 
 import requests
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -36,6 +38,49 @@ presence_lock = Lock()
 presence_condition = Condition(presence_lock)
 presence_sessions: dict[str, dict] = {}
 presence_revision = 0
+rate_lock = Lock()
+rate_windows = {}
+RATE_RULES = {"/": (20, 60), "/api/presence/join": (30, 60),
+              "/api/presence/events": (30, 60), "/api/refresh": (1, 60),
+              "/api/search/refresh": (4, 60), "/api/export.csv": (10, 60),
+              "/api/compatibility": (12, 60)}
+
+
+def _rate_wait(client: str, path: str, now: float) -> int:
+    if path.startswith("/api/compatibility/"):
+        path = "/api/compatibility"
+    limit, window = RATE_RULES.get(path, (120, 60))
+    with rate_lock:
+        for key in list(rate_windows):
+            if not rate_windows[key] or now - rate_windows[key][-1] >= 60:
+                del rate_windows[key]
+        bucket = rate_windows.setdefault((client, path), deque())
+        while bucket and now - bucket[0] >= window:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            return max(1, math.ceil(window - (now - bucket[0])))
+        bucket.append(now)
+    return 0
+
+
+@app.middleware("http")
+async def limit_requests(request: Request, call_next):
+    path = request.url.path
+    if (path == "/" or path.startswith("/api/")) and path not in {
+            "/api/presence/leave"}:
+        client = request.client.host if request.client else "unknown"
+        wait = _rate_wait(client, path, monotonic())
+        if wait:
+            if path == "/":
+                return HTMLResponse(f'<html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+                                    f'<meta http-equiv="refresh" content="{wait}"><title>Comparador 3D</title>'
+                                    f'<body style="background:#14182a;color:#eef2ff;font:18px system-ui;padding:10vw">'
+                                    f'<h1>Demasiadas recargas</h1><p>Espera {wait} segundos. La página volverá a abrirse.</p></body></html>',
+                                    status_code=429, headers={"Retry-After": str(wait), "Cache-Control": "no-store"})
+            return JSONResponse({"detail": f"Espera {wait} segundos para volver a intentarlo.",
+                                 "retry_after": wait}, status_code=429,
+                                headers={"Retry-After": str(wait), "Cache-Control": "no-store"})
+    return await call_next(request)
 
 
 class PresenceJoin(BaseModel):

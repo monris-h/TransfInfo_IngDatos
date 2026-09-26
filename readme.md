@@ -63,6 +63,8 @@ Escribir en el buscador solo filtra `data/products.json`; no realiza solicitudes
 
 ## Resiliencia y validación
 
+La API limita peticiones por IP: 20 recargas, 30 entradas de presencia, una actualización general, cuatro búsquedas actualizadas, diez CSV y doce consultas de compatibilidad por minuto. Las demás rutas API permiten 120 peticiones por minuto y ruta. Al superar un límite responde HTTP 429 con `Retry-After`; los botones de actualización muestran una cuenta regresiva, que se conserva al recargar. El aviso de salida de presencia no se limita para retirar usuarios inmediatamente. En Dokploy, Uvicorn recibe la IP del cliente a través del proxy interno.
+
 - Solicitudes GET con timeout de conexión (5 s) y lectura (20 s).
 - En la ingesta general, hasta tres reintentos para errores de conexión, lectura, HTTP 429 y HTTP 5xx, con espera exponencial y respeto de `Retry-After`. La búsqueda interactiva usa límites de tiempo más cortos para no dejar la página esperando indefinidamente.
 - Pausa de un segundo entre consultas de la misma tienda en la ejecución normal. La paginación de API se limita a diez páginas por fuente.

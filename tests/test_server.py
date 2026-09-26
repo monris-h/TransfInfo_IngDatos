@@ -1,12 +1,37 @@
 import csv
 import io
 import json
+from fastapi.testclient import TestClient
 from threading import Event
 from time import monotonic, sleep
 
 from app import server
 from app import pipeline
 from fastapi import HTTPException
+
+
+def test_rate_limit_blocks_repeated_refresh_and_recovers(monkeypatch):
+    monkeypatch.setattr(server, "rate_windows", {})
+    assert server._rate_wait("one", "/api/refresh", 100) == 0
+    assert server._rate_wait("one", "/api/refresh", 101) == 59
+    assert server._rate_wait("other", "/api/refresh", 101) == 0
+    assert server._rate_wait("one", "/api/refresh", 160) == 0
+
+
+def test_rate_limit_http_returns_retry_after_and_keeps_leave_available(monkeypatch):
+    monkeypatch.setattr(server, "rate_windows", {})
+    client = TestClient(server.app)
+    for _ in range(20):
+        assert client.get("/").status_code == 200
+    limited = client.get("/")
+    assert limited.status_code == 429
+    assert int(limited.headers["Retry-After"]) > 0
+    for _ in range(4):
+        assert client.post("/api/search/refresh", json={"query": "x", "context": "impresora"}).status_code == 400
+    limited = client.post("/api/search/refresh", json={"query": "x", "context": "impresora"})
+    assert limited.status_code == 429
+    assert limited.json()["retry_after"] > 0
+    assert client.post("/api/presence/leave", json={"session_id": "missing"}).status_code == 200
 
 
 def test_products_returns_local_results_without_live_request(monkeypatch):

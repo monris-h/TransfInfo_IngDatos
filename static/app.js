@@ -30,6 +30,37 @@ const sourceCatalog = [
   {name: 'Mercado Libre', method: 'Scraping', detail: 'Resultados públicos de búsqueda', url: 'https://www.mercadolibre.com.mx/'},
 ];
 
+const cooldownLabels = {refresh: '↻ Actualizar datos', 'search-refresh': 'Actualizar esta búsqueda'};
+function paintCooldown(id) {
+  const remaining = Math.ceil((Number(sessionStorage.getItem(`cooldown_${id}`)) - Date.now()) / 1000);
+  if (id === 'refresh' && refreshInfo?.status === 'running') return;
+  const button = $(id);
+  if (remaining <= 0 && button.dataset.busy === 'true') return;
+  if (remaining > 0) {
+    button.disabled = true;
+    (id === 'refresh' ? button.querySelector('span') : button).textContent = `Espera ${remaining}s`;
+  } else if (button.dataset.cooling === 'true') {
+    button.disabled = false;
+    (id === 'refresh' ? button.querySelector('span') : button).textContent = cooldownLabels[id];
+  }
+  button.dataset.cooling = String(remaining > 0);
+}
+function cooldown(id, seconds) {
+  sessionStorage.setItem(`cooldown_${id}`, Date.now() + seconds * 1000);
+  paintCooldown(id);
+}
+setInterval(() => Object.keys(cooldownLabels).forEach(paintCooldown), 1000);
+
+async function responseData(response, buttonId) {
+  const data = await response.json();
+  if (!response.ok) {
+    if (response.status === 429 && buttonId) cooldown(buttonId, data.retry_after || 60);
+    throw Object.assign(new Error(data.detail || `HTTP ${response.status}`),
+      {status: response.status, retryAfter: data.retry_after});
+  }
+  return data;
+}
+
 function el(tag, className, value) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -145,9 +176,15 @@ async function presenceRequest(path, payload) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload),
   });
-  const data = await response.json();
-  if (!response.ok) throw Object.assign(new Error(data.detail || `HTTP ${response.status}`), {status: response.status});
-  return data;
+  return responseData(response);
+}
+
+function retryPresence(error) {
+  if (error.status === 429 && presenceUsername) {
+    setTimeout(() => {
+      if (!document.hidden) joinPresence(presenceUsername).catch(retryPresence);
+    }, (error.retryAfter || 60) * 1000);
+  }
 }
 
 function sendPresenceLeave(sessionId, viewId) {
@@ -467,6 +504,7 @@ function showRefreshState(state) {
     ? `Actualizando ${state.completed_stores}/${state.total_stores}`
     : running ? 'Actualizando…' : '↻  Actualizar datos';
   if (running) showNotice(refreshMessage(state), false, true);
+  else paintCooldown('refresh');
 }
 
 async function pollRefresh() {
@@ -570,15 +608,16 @@ async function refreshSearch() {
   const query = $('search').value.trim();
   if (query.length < 2) return;
   const button = $('search-refresh');
+  button.dataset.busy = 'true';
   button.disabled = true;
+  cooldown('search-refresh', 15);
   showNotice(`Consultando precios actuales para “${query}”…`, false, true);
   try {
     const response = await fetch('/api/search/refresh', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({query, context: activeView === 'impresoras' ? 'impresora' : 'filamento', store: $('store').value}),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    const data = await responseData(response, 'search-refresh');
     await load();
     const count = data.saved;
     const failures = data.failures.length;
@@ -586,7 +625,9 @@ async function refreshSearch() {
   } catch (error) {
     showNotice(`No se pudo actualizar “${query}”: ${error.message}`, true);
   } finally {
+    button.dataset.busy = 'false';
     button.disabled = false;
+    paintCooldown('search-refresh');
     updateSearchRefresh();
   }
 }
@@ -629,11 +670,11 @@ $('login-form').addEventListener('submit', async event => {
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) leavePresenceView();
-  else if (presenceUsername) joinPresence(presenceUsername).catch(() => {});
+  else if (presenceUsername) joinPresence(presenceUsername).catch(retryPresence);
 });
 window.addEventListener('pagehide', leavePresenceView);
 window.addEventListener('pageshow', event => {
-  if (event.persisted && presenceUsername && !document.hidden) joinPresence(presenceUsername).catch(() => {});
+  if (event.persisted && presenceUsername && !document.hidden) joinPresence(presenceUsername).catch(retryPresence);
 });
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => {if (activeView !== tab.dataset.view) {setView(tab.dataset.view); load();}});
@@ -650,11 +691,11 @@ window.addEventListener('hashchange', () => {setView(location.hash === '#filamen
 $('clear-compare').addEventListener('click', () => {selected.clear(); renderCompare(); renderResults();});
 $('refresh').addEventListener('click', async () => {
   $('refresh').disabled = true;
+  cooldown('refresh', 60);
   $('refresh').querySelector('span').textContent = 'Iniciando…';
   try {
     const response = await fetch('/api/refresh', {method: 'POST'});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    const data = await responseData(response, 'refresh');
     showRefreshState(data);
     refreshTimer = setTimeout(pollRefresh, 1000);
   } catch (error) {
@@ -665,11 +706,16 @@ $('refresh').addEventListener('click', async () => {
       showNotice('Sin conexión con el servidor. Reintentando…', true);
       refreshTimer = setTimeout(pollRefresh, 3000);
     } else showNotice(`Error de ingesta: ${error.message}`, true);
+    paintCooldown('refresh');
   }
 });
 setView(activeView);
 updateSearchRefresh();
 load();
 pollRefresh();
-if (presenceUsername) joinPresence(presenceUsername).catch(showLogin);
+Object.keys(cooldownLabels).forEach(paintCooldown);
+if (presenceUsername) joinPresence(presenceUsername).catch(error => {
+  if (error.status === 429) retryPresence(error);
+  else showLogin();
+});
 else showLogin();
